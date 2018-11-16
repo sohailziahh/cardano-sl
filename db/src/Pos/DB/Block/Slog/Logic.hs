@@ -62,7 +62,7 @@ import qualified Pos.DB.GState.Common as GS
                      getMaxSeenDifficulty)
 import           Pos.DB.Lrc (HasLrcContext, lrcActionOnEpochReason)
 import qualified Pos.DB.Lrc as LrcDB
-import           Pos.DB.Lrc.OBFT (getSlotLeaderObft)
+import           Pos.DB.Lrc.OBFT (getEpochSlotLeaderScheduleObft)
 import           Pos.DB.Update (getAdoptedBVFull, getConsensusEra)
 import           Pos.Util (_neHead, _neLast)
 import           Pos.Util.AssertMode (inAssertMode)
@@ -187,6 +187,7 @@ slogVerifyBlocksOriginal genesisConfig curSlot blocks = runExceptT $ do
     verResToMonadError formatAllErrors $
         verifyBlocks
             genesisConfig
+            Original
             txValRules
             curSlot
             dataMustBeKnown
@@ -238,20 +239,13 @@ slogVerifyBlocksOBFT genesisConfig curSlot blocks = runExceptT $ do
     logInfo $ sformat ("slogVerifyBlocksOBFT: Consensus era is " % shown) era
     (adoptedBV, adoptedBVD) <- lift getAdoptedBVFull
     let dataMustBeKnown = mustDataBeKnown uc adoptedBV
-    let epochSlots = pcEpochSlots (configProtocolConstants genesisConfig)
-    let initialSlot = case curSlot of
-                          -- TODO mhueschen | make sure this is correct
-                          -- We do not have a SlotId, so we are starting
-                          -- at genesis
-                          Nothing -> error "slogVerifyBlocksOBFT: no slotId" -- slotIdToEnum epochSlots 0
-                          Just cs -> cs
-    leadersList <-
-        lift $ map fst <$> mapM (getSlotLeaderObft genesisConfig)
-                    (take (length blocks) (iterate (slotIdSucc epochSlots)
-                                                   initialSlot))
-    let leaders = case nonEmpty leadersList of
-                      Nothing -> error "slogVerifyBlocksOBFT: empty list of leaders"
-                      Just ls -> ls
+    initialSlot <- case curSlot of
+                        Just cs -> pure cs
+                        Nothing -> throwError "slogVerifyBlocksOBFT: curSlot set to Nothing - \
+                                    \this occurs in EBBs which should not appear"
+    leaders <- lift $ getEpochSlotLeaderScheduleObft genesisConfig
+                                                     (siEpoch initialSlot)
+    logInfo $ sformat ("slogVerifyBlocksOBFT: leaders: "%shown) leaders
     -- Do pure block verification.
     currentEpoch <- epochOrSlotToEpochIndex . getEpochOrSlot <$> DB.getTipHeader
     let txValRulesConfig = configTxValRules $ genesisConfig
@@ -261,6 +255,7 @@ slogVerifyBlocksOBFT genesisConfig curSlot blocks = runExceptT $ do
     verResToMonadError formatAllErrors $
         verifyBlocks
             genesisConfig
+            OBFT
             txValRules
             curSlot
             dataMustBeKnown
