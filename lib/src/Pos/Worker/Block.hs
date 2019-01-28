@@ -50,12 +50,12 @@ import           Pos.Crypto (ProxySecretKey (pskDelegatePk))
 import           Pos.DB (gsIsBootstrapEra)
 import           Pos.DB.Block (calcChainQualityFixedTime, calcChainQualityM,
                      calcOverallChainQuality, createGenesisBlockAndApply,
-                     createMainBlockAndApply, slogGetLastSlots)
+                     createMainBlockAndApply, slogGetLastSlots, lrcSingleShot)
 import qualified Pos.DB.BlockIndex as DB
 import           Pos.DB.Delegation (getDlgTransPsk, getPskByIssuer)
 import qualified Pos.DB.Lrc as LrcDB (getLeadersForEpoch)
 import           Pos.DB.Lrc.OBFT (getSlotLeaderObft)
-import           Pos.DB.Update (getAdoptedBVData, getConsensusEra)
+import           Pos.DB.Update (getAdoptedBVData, getAdoptedBV, getConsensusEra)
 import           Pos.Infra.Diffusion.Types (Diffusion)
 import qualified Pos.Infra.Diffusion.Types as Diffusion
                      (Diffusion (announceBlockHeader))
@@ -150,13 +150,23 @@ blockCreator
 blockCreator genesisConfig txpConfig slotId diffusion = do
     era <- getConsensusEra
     logInfo $ sformat ("blockCreator: Consensus era is " % shown) era
+
+    bv <- getAdoptedBV
+    bvd <- getAdoptedBVData
+    logInfo $ sformat ("blockCreator: Adopted BV is " % shown) bv
+    logInfo $ sformat ("blockCreator: Adopted BVD is " % shown) bvd
+
     logInfo $ sformat ("blockCreator: slotId is " % shown) slotId
     case era of
         Original -> blockCreatorOriginal genesisConfig
                                          txpConfig
                                          slotId
                                          diffusion
-        OBFT _   -> blockCreatorObft genesisConfig txpConfig slotId diffusion
+        OBFT _   -> do
+            when ((siSlot slotId) == localSlotIndexMinBound) $ do
+                logDebug $ "blockCreator OBFT: running lrcSingleShot"
+                lrcSingleShot genesisConfig (siEpoch slotId)
+            blockCreatorObft genesisConfig txpConfig slotId diffusion
 
 blockCreatorObft
     :: ( BlockWorkMode ctx m
