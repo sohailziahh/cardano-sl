@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE LambdaCase    #-}
+{-# LANGUAGE Rank2Types    #-}
 
 module Cardano.Node.Client
     ( -- Node Client
@@ -10,6 +11,8 @@ module Cardano.Node.Client
     -- * HTTP instance
     , NodeHttpClient
     , mkHttpClient
+    , hoist
+
     -- * Deprecated
     , applyUpdate
     , postponeUpdate
@@ -97,6 +100,26 @@ fromServantError err = case err of
 -- * HTTP Instance
 
 type NodeHttpClient = NodeClient (ExceptT (ClientError ()) IO)
+
+
+hoist
+    :: (forall t . m t -> n t)
+    -> NodeClient m
+    -> NodeClient n
+hoist eta m = NodeClient
+    { getUtxo =
+        eta $ getUtxo m
+    , getConfirmedProposals =
+        eta $ getConfirmedProposals m
+    , getNodeSettings =
+        eta $ getNodeSettings m
+    , getNodeInfo = \forceNtpCheck ->
+        eta $ getNodeInfo m forceNtpCheck
+    , getNextUpdate =
+        eta $ getNextUpdate m
+    , restartNode =
+        eta $ restartNode m
+    }
 
 mkHttpClient
     :: BaseUrl
