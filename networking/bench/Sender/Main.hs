@@ -13,6 +13,7 @@ module Main where
 import           Control.Applicative (empty, liftA2)
 import           Control.Concurrent (threadDelay)
 import           Control.Concurrent.Async (concurrently, forConcurrently)
+import           Control.Concurrent.MVar (readMVar)
 import           Control.Exception (throwIO)
 import           Control.Exception.Safe (throwString)
 import           Control.Monad (forM, forM_)
@@ -34,7 +35,11 @@ import           Node (Conversation (..), ConversationActions (..), Node (Node),
 import           Node.Internal (NodeId (..))
 import           Node.Message.Binary (binaryPacking)
 import           Pos.Util.Trace (Severity (..), wlogTrace)
-import           Pos.Util.Wlog (removeAllHandlers)
+import           Pos.Util.Wlog (LoggingHandler (..),
+                     LoggingHandlerInternal (..), removeAllHandlers)
+
+import           Cardano.BM.Trace (logDebug, logError, logInfo, logNotice,
+                     logWarning)
 
 import           Bench.Network.Commons (MeasureEvent (..), Payload (..),
                      Ping (..), Pong (..), loadLogConfig, logMeasure)
@@ -58,8 +63,18 @@ main = do
             argsParser
             empty
 
-    lh <- loadLogConfig logsPrefix logConfig
+    -- creates a Trace from a config file and stores it in the logginghandler
+    lh <- loadLogConfig logsPrefix $ Just "networking/bench/Sender/log-config.yaml"
     setLocaleEncoding utf8
+
+    -- extract the trace from the logging handler
+    tr <- lhiTrace <$> readMVar (getLSI lh)
+    -- use iohk-monitoring-framework functions
+    logDebug   tr "this is a debug message"
+    logInfo    tr "this is an information."
+    logNotice  tr "this is a notice!"
+    logWarning tr "this is a warning!"
+    logError   tr "this is an error!"
 
     transport <- do
         transportOrError <-
